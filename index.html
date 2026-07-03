@@ -310,8 +310,10 @@
 
   <script>
     const STORAGE_KEY = 'iccLessonLog';
+    const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxjVnKGOgO_RfcY_6LaqldVvtVVctpb9BJkj54r_NXUF_QflKaYtAQYPcp-0Br8appF/exec';
 
     let settings = JSON.parse(localStorage.getItem(`${STORAGE_KEY}_settings`) || '{}');
+    if (!settings.scriptUrl) settings.scriptUrl = DEFAULT_SCRIPT_URL;
     let recentLessons = JSON.parse(localStorage.getItem(`${STORAGE_KEY}_recent`) || '[]');
     let selectedDuration = '1 hour';
     let selectedGuestMember = 'GUEST';

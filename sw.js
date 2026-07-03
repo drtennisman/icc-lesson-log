@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lesson-log-v2';
+const CACHE_NAME = 'lesson-log-v3';
 const ASSETS = ['./index.html', './manifest.json'];
 
 self.addEventListener('install', (e) => {
