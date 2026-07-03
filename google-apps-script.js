@@ -1,38 +1,64 @@
 // Google Apps Script — deploy as Web App
-// 1. Create a new Google Sheet
-// 2. Create a tab called "Pros" and list pro names in column A (one per row)
-// 3. Go to Extensions > Apps Script
-// 4. Paste this code
-// 5. Deploy > New Deployment > Web App
+// 1. Open the "ICC Lesson Log Worksheet for App" Google Sheet
+// 2. Go to Extensions > Apps Script
+// 3. Paste this code
+// 4. Deploy > New Deployment > Web App
 //    - Execute as: Me
 //    - Who has access: Anyone
-// 6. Copy the deployment URL and paste it into the app's Settings
+// 5. Copy the deployment URL and paste it into the app's Settings
 //
-// All lessons land in a single "Lesson Log" tab so the shop manager can
-// work down one list and tick the "Charged" checkbox after entering each
-// lesson in Jonas.
+// Tabs are created automatically on first use — no manual sheet setup:
+// - "Pros" tab: the pro list (seeded with the current roster). To add or
+//   remove a pro, just edit the names in column A — the app's dropdown
+//   updates on next load.
+// - "Lesson Log" tab: one row per lesson, all pros in one list, with a
+//   "Charged" checkbox the shop manager ticks after entering it in Jonas.
 
 const HEADERS = ['Date', 'Pro', 'Client Name', 'Member/Guest', 'Duration', 'People', 'Notes', 'Charged'];
 const LOG_SHEET_NAME = 'Lesson Log';
+const PROS_SHEET_NAME = 'Pros';
 const CHARGED_COL = 8;
 const GUEST_MEMBER_COL = 4;
+
+const DEFAULT_PROS = [
+  'J.C. Freeman',
+  'Joey Francis',
+  'A.B. Hill',
+  'Will Davidson',
+  'Matt Kendrick',
+  'Lisa Webb',
+  'Stephanie Heckler'
+];
+
+function getProsSheet_(ss) {
+  var prosSheet = ss.getSheetByName(PROS_SHEET_NAME);
+  if (!prosSheet) {
+    prosSheet = ss.insertSheet(PROS_SHEET_NAME);
+    prosSheet.appendRow(['Pro Names (edit anytime — the app updates on next load)']);
+    prosSheet.getRange(1, 1).setFontWeight('bold');
+    prosSheet.setFrozenRows(1);
+    for (var i = 0; i < DEFAULT_PROS.length; i++) {
+      prosSheet.appendRow([DEFAULT_PROS[i]]);
+    }
+    prosSheet.setColumnWidth(1, 400);
+  }
+  return prosSheet;
+}
 
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : '';
 
   if (action === 'getPros') {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var prosSheet = ss.getSheetByName('Pros');
+    var prosSheet = getProsSheet_(ss);
 
     var pros = [];
-    if (prosSheet) {
-      var lastRow = prosSheet.getLastRow();
-      if (lastRow > 0) {
-        var values = prosSheet.getRange(1, 1, lastRow, 1).getValues();
-        for (var i = 0; i < values.length; i++) {
-          var name = values[i][0].toString().trim();
-          if (name) pros.push(name);
-        }
+    var lastRow = prosSheet.getLastRow();
+    if (lastRow > 1) {
+      var values = prosSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < values.length; i++) {
+        var name = values[i][0].toString().trim();
+        if (name) pros.push(name);
       }
     }
 
