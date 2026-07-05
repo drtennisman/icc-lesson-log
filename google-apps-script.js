@@ -13,12 +13,26 @@
 //   updates on next load.
 // - "Lesson Log" tab: one row per lesson, all pros in one list, with a
 //   "Charged" checkbox the shop manager ticks after entering it in Jonas.
+//
+// WEEKLY UNCHARGED REMINDER (optional — one-time setup):
+//   After pasting this code, run the "setupWeeklyReminder" function once
+//   (pick it from the toolbar dropdown and click Run, then authorize).
+//   Every Monday morning it emails the people listed on the "Reminders"
+//   tab about any lessons whose "Charged" box is still unchecked.
+//   - "Reminders" tab columns: Name | Email | Send What
+//   - Send What = "All lessons" (whole outstanding list, for the manager)
+//     or "Only their own" (just that person's lessons, for each pro).
+//   Add or change emails on that tab anytime — no code edits needed.
 
 const HEADERS = ['Date', 'Pro', 'Client Name', 'Member/Guest', 'Duration', 'People', 'Notes', 'Charged'];
 const LOG_SHEET_NAME = 'Lesson Log';
 const PROS_SHEET_NAME = 'Pros';
+const REMINDERS_SHEET_NAME = 'Reminders';
 const CHARGED_COL = 8;
 const GUEST_MEMBER_COL = 4;
+
+// Lessons uncharged longer than this many days get a ⚠️ flag in the email.
+const AGING_DAYS = 14;
 
 const DEFAULT_PROS = [
   'J.C. Freeman',
@@ -127,5 +141,205 @@ function doPost(e) {
 
   } finally {
     lock.releaseLock();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Weekly uncharged-lessons reminder
+// ---------------------------------------------------------------------------
+
+// Run this ONCE (from the Apps Script editor toolbar) to schedule the weekly
+// email. Safe to run again — it clears any old copy of the schedule first.
+function setupWeeklyReminder() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'sendUnchargedDigest') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('sendUnchargedDigest')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(7)
+    .create();
+}
+
+// Turn a Date or "m/d/yy" string cell into a Date (or null if unparseable).
+function coerceDate_(val) {
+  if (val instanceof Date && !isNaN(val)) return val;
+  if (typeof val === 'string') {
+    var parts = val.split('/');
+    if (parts.length === 3) {
+      var m = parseInt(parts[0], 10);
+      var d = parseInt(parts[1], 10);
+      var y = parseInt(parts[2], 10);
+      if (y < 100) y += 2000;
+      var dt = new Date(y, m - 1, d);
+      if (!isNaN(dt)) return dt;
+    }
+  }
+  return null;
+}
+
+// Returns the "Reminders" tab, creating and seeding it on first use so J.C.
+// only has to fill in email addresses.
+function getRemindersSheet_(ss) {
+  var sheet = ss.getSheetByName(REMINDERS_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(REMINDERS_SHEET_NAME);
+  sheet.appendRow(['Name', 'Email', 'Send What ("All lessons" or "Only their own")']);
+  sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#1a1a2e').setFontColor('#ffffff');
+  sheet.setFrozenRows(1);
+
+  sheet.appendRow(['Shop Manager', '', 'All lessons']);
+  for (var i = 0; i < DEFAULT_PROS.length; i++) {
+    var name = DEFAULT_PROS[i];
+    var isJC = name === 'J.C. Freeman';
+    sheet.appendRow([name, isJC ? 'jcdfreeman@gmail.com' : '', isJC ? 'All lessons' : 'Only their own']);
+  }
+
+  sheet.setColumnWidth(1, 160);
+  sheet.setColumnWidth(2, 240);
+  sheet.setColumnWidth(3, 320);
+  return sheet;
+}
+
+// Reads the Reminders tab into [{name, email, ownOnly}]. Rows without a valid
+// email are skipped. "Send What" containing "own" => that person's lessons only.
+function getReminderRecipients_(ss) {
+  var sheet = getRemindersSheet_(ss);
+  var recipients = [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var name = (values[i][0] || '').toString().trim();
+      var email = (values[i][1] || '').toString().trim();
+      var scope = (values[i][2] || '').toString().trim().toLowerCase();
+      if (email.indexOf('@') === -1) continue;
+      recipients.push({ name: name, email: email, ownOnly: scope.indexOf('own') !== -1 });
+    }
+  }
+  return recipients;
+}
+
+// Builds one recipient's email from their relevant uncharged lessons.
+function buildDigestEmail_(list, opts) {
+  var agingCount = 0;
+  var rowsHtml = '';
+  for (var j = 0; j < list.length; j++) {
+    var o = list[j];
+    var aging = o.ageDays >= AGING_DAYS;
+    if (aging) agingCount++;
+    var flag = aging ? '⚠️ ' : '';
+    var rowBg = aging ? '#fdecea' : (j % 2 === 0 ? '#ffffff' : '#f5f5f5');
+    var gmColor = (o.guestMember === 'GUEST') ? '#e74c3c' : '#2ecc71';
+    rowsHtml +=
+      '<tr style="background:' + rowBg + '">' +
+      '<td style="padding:6px 10px;border:1px solid #ddd">' + flag + o.date + '</td>' +
+      '<td style="padding:6px 10px;border:1px solid #ddd">' + o.ageDays + 'd</td>' +
+      (opts.ownOnly ? '' : '<td style="padding:6px 10px;border:1px solid #ddd">' + o.pro + '</td>') +
+      '<td style="padding:6px 10px;border:1px solid #ddd">' + o.client + '</td>' +
+      '<td style="padding:6px 10px;border:1px solid #ddd;color:' + gmColor + ';font-weight:bold">' + o.guestMember + '</td>' +
+      '<td style="padding:6px 10px;border:1px solid #ddd">' + o.duration + (o.people > 1 ? ' · ' + o.people + ' people' : '') + '</td>' +
+      '</tr>';
+  }
+
+  var intro = opts.ownOnly
+    ? 'Hi ' + (opts.name || 'there') + ' — a heads-up that these lessons you logged haven\'t been marked <b>Charged</b> yet. ' +
+      'If any look overdue or wrong, give the pro shop a nudge.'
+    : 'These lessons are logged but the <b>Charged</b> box is still unchecked. ' +
+      'Charge each in Jonas, then tick its box in the sheet and it drops off this list.';
+
+  var subject = '🎾 ' + list.length + (opts.ownOnly ? ' of your lessons' : ' lesson' + (list.length === 1 ? '' : 's')) +
+    ' still to charge' + (agingCount > 0 ? ' (' + agingCount + ' aging)' : '');
+
+  var htmlBody =
+    '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">' +
+    '<p>' + intro + '</p>' +
+    (agingCount > 0
+      ? '<p style="color:#c0392b"><b>⚠️ ' + agingCount + ' ' + (agingCount === 1 ? 'lesson has' : 'lessons have') +
+        ' been waiting ' + AGING_DAYS + '+ days.</b></p>'
+      : '') +
+    '<table style="border-collapse:collapse;font-size:13px">' +
+    '<tr style="background:#1a1a2e;color:#fff">' +
+    '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Date</th>' +
+    '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Age</th>' +
+    (opts.ownOnly ? '' : '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Pro</th>') +
+    '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Client</th>' +
+    '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">M/G</th>' +
+    '<th style="padding:6px 10px;border:1px solid #ddd;text-align:left">Lesson</th>' +
+    '</tr>' + rowsHtml + '</table>' +
+    '<p style="margin-top:14px"><a href="' + opts.sheetUrl + '">Open the Lesson Log</a></p>' +
+    '</div>';
+
+  return { subject: subject, htmlBody: htmlBody };
+}
+
+// Scans the Lesson Log for unchecked "Charged" rows and emails each person on
+// the Reminders tab. Called by the weekly trigger; also runnable by hand to test.
+function sendUnchargedDigest() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!sheet) return;
+
+  var lastRow = sheet.getLastRow();
+  var outstanding = [];
+  if (lastRow > 1) {
+    var values = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+    var now = new Date();
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var charged = row[CHARGED_COL - 1] === true;
+      var client = (row[2] || '').toString().trim();
+      if (charged || !client) continue;
+
+      var dt = coerceDate_(row[0]);
+      var ageDays = dt ? Math.floor((now - dt) / 86400000) : 0;
+      outstanding.push({
+        date: dt ? Utilities.formatDate(dt, ss.getSpreadsheetTimeZone(), 'M/d/yy') : (row[0] || ''),
+        sortKey: dt ? dt.getTime() : Number.MAX_SAFE_INTEGER,
+        ageDays: ageDays,
+        pro: (row[1] || '').toString(),
+        client: client,
+        guestMember: row[3] || '',
+        duration: row[4] || '',
+        people: row[5] || 1
+      });
+    }
+  }
+
+  outstanding.sort(function (a, b) { return a.sortKey - b.sortKey; });
+
+  var sheetUrl = ss.getUrl();
+  var recipients = getReminderRecipients_(ss);
+
+  for (var r = 0; r < recipients.length; r++) {
+    var person = recipients[r];
+    var list = outstanding;
+    if (person.ownOnly) {
+      var target = person.name.toLowerCase();
+      list = outstanding.filter(function (o) { return o.pro.trim().toLowerCase() === target; });
+      // Don't nag a pro who's all caught up.
+      if (list.length === 0) continue;
+    }
+
+    var email;
+    if (list.length === 0) {
+      // "All lessons" recipient with nothing outstanding — send the all-clear.
+      email = {
+        subject: '✅ Lesson charging: all caught up',
+        htmlBody:
+          '<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">' +
+          '<p>Nice work — every logged lesson is marked <b>Charged</b>. Nothing outstanding this week.</p>' +
+          '<p><a href="' + sheetUrl + '">Open the Lesson Log</a></p>' +
+          '</div>'
+      };
+    } else {
+      email = buildDigestEmail_(list, { ownOnly: person.ownOnly, name: person.name, sheetUrl: sheetUrl });
+    }
+
+    MailApp.sendEmail({ to: person.email, subject: email.subject, htmlBody: email.htmlBody });
   }
 }
