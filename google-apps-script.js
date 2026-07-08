@@ -150,7 +150,11 @@ function doPost(e) {
 
 // Run this ONCE (from the Apps Script editor toolbar) to schedule the weekly
 // email. Safe to run again — it clears any old copy of the schedule first.
+// Also creates the "Reminders" tab now so you can fill in emails before the
+// first send.
 function setupWeeklyReminder() {
+  getRemindersSheet_(SpreadsheetApp.getActiveSpreadsheet());
+
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
     if (triggers[i].getHandlerFunction() === 'sendUnchargedDigest') {
@@ -196,7 +200,7 @@ function getRemindersSheet_(ss) {
   for (var i = 0; i < DEFAULT_PROS.length; i++) {
     var name = DEFAULT_PROS[i];
     var isJC = name === 'J.C. Freeman';
-    sheet.appendRow([name, isJC ? 'jcdfreeman@gmail.com' : '', isJC ? 'All lessons' : 'Only their own']);
+    sheet.appendRow([name, isJC ? 'invernessjuniortennisacademy@gmail.com' : '', isJC ? 'All lessons' : 'Only their own']);
   }
 
   sheet.setColumnWidth(1, 160);
