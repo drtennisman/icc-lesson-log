@@ -277,20 +277,99 @@
       min-width: 24px;
       text-align: center;
     }
+
+    /* Header name badge */
+    .user-badge {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(255,255,255,0.15);
+      padding: 3px 12px;
+      border-radius: 20px;
+      color: #fff;
+    }
+
+    /* Screens */
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* First-run setup */
+    .setup-logo { text-align: center; margin: 28px 0 14px; }
+    .setup-logo img {
+      width: 84px;
+      height: 84px;
+      border-radius: 20px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    }
+    .setup-title {
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: #021f3d;
+      margin-bottom: 6px;
+    }
+    .setup-subtitle {
+      text-align: center;
+      font-size: 14px;
+      color: #777;
+      margin-bottom: 24px;
+    }
+    .setup-card {
+      background: #fff;
+      border: 1px solid #eaeaea;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .setup-card label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .setup-error {
+      color: #c62828;
+      font-size: 13px;
+      margin-top: 10px;
+      text-align: center;
+      min-height: 18px;
+    }
   </style>
 </head>
 <body>
-  <div class="header">
+  <div class="header" id="appHeader" style="display:none;">
     <div class="header-inner">
       <img src="icon-192.png" alt="ICC" class="header-logo">
       <div class="header-text">
         <h1>ICC Lesson Log</h1>
-        <div class="subtitle">Log a Lesson</div>
+        <div class="user-badge" id="headerUser"></div>
       </div>
     </div>
   </div>
 
   <div class="container">
+
+    <!-- ═══ SETUP SCREEN (first run) ═══ -->
+    <div id="setupScreen" class="screen">
+      <div class="setup-logo"><img src="icon-192.png" alt="ICC"></div>
+      <div class="setup-title">ICC Lesson Log</div>
+      <div class="setup-subtitle">Who are you?</div>
+      <div class="setup-card">
+        <label for="setupProName">Your Name</label>
+        <select id="setupProName">
+          <option value="">Loading pros...</option>
+        </select>
+        <button class="submit-btn" id="setupBtn" onclick="completeSetup()">Get Started</button>
+        <p class="setup-error" id="setupError"></p>
+      </div>
+    </div>
+
+    <!-- ═══ MAIN SCREEN ═══ -->
+    <div id="mainScreen" class="screen">
     <form id="lessonForm">
       <div class="form-group">
         <label>Date</label>
@@ -363,6 +442,7 @@
       <input type="url" id="scriptUrl" placeholder="https://script.google.com/macros/s/...">
       <button class="save-btn" onclick="saveSettings()">Save Settings</button>
     </div>
+    </div><!-- /mainScreen -->
   </div>
 
   <script>
@@ -386,26 +466,62 @@
     document.getElementById('scriptUrl').value = settings.scriptUrl || '';
 
     async function loadPros() {
-      const select = document.getElementById('proName');
+      const selects = [document.getElementById('proName'), document.getElementById('setupProName')];
       if (!settings.scriptUrl) {
-        select.innerHTML = '<option value="">Set Script URL first</option>';
+        selects.forEach(s => { if (s) s.innerHTML = '<option value="">Set Script URL first</option>'; });
         return;
       }
       try {
         const res = await fetch(settings.scriptUrl + '?action=getPros');
         const data = await res.json();
         if (data.result === 'success' && data.pros.length > 0) {
-          select.innerHTML = '<option value="">Select pro...</option>' +
-            data.pros.map(p => `<option value="${p}"${p === settings.proName ? ' selected' : ''}>${p}</option>`).join('');
+          selects.forEach(s => {
+            if (!s) return;
+            s.innerHTML = '<option value="">Select your name...</option>' +
+              data.pros.map(p => `<option value="${p}"${p === settings.proName ? ' selected' : ''}>${p}</option>`).join('');
+          });
         } else {
-          select.innerHTML = '<option value="">No pros found — add names to Pros tab</option>';
+          selects.forEach(s => { if (s) s.innerHTML = '<option value="">No pros found — add names to Pros tab</option>'; });
         }
       } catch (err) {
-        select.innerHTML = '<option value="">Failed to load pros</option>';
+        selects.forEach(s => { if (s) s.innerHTML = '<option value="">Failed to load pros</option>'; });
       }
     }
 
     loadPros();
+
+    // ─── Identity: pick your name once, then it's you moving forward ───
+    function updateHeaderBadge() {
+      const badge = document.getElementById('headerUser');
+      badge.textContent = settings.proName || '';
+      badge.style.display = settings.proName ? 'inline-block' : 'none';
+    }
+
+    function enterMain() {
+      document.getElementById('setupScreen').classList.remove('active');
+      document.getElementById('mainScreen').classList.add('active');
+      document.getElementById('appHeader').style.display = 'block';
+      updateHeaderBadge();
+    }
+
+    function showSetup() {
+      document.getElementById('mainScreen').classList.remove('active');
+      document.getElementById('setupScreen').classList.add('active');
+      document.getElementById('appHeader').style.display = 'none';
+    }
+
+    function completeSetup() {
+      const val = document.getElementById('setupProName').value;
+      const err = document.getElementById('setupError');
+      if (!val) { err.textContent = 'Please select your name.'; return; }
+      err.textContent = '';
+      settings.proName = val;
+      localStorage.setItem(`${STORAGE_KEY}_settings`, JSON.stringify(settings));
+      enterMain();
+    }
+
+    // Returning pro (name already saved) goes straight to the form; first-timers see setup.
+    if (settings.proName) { enterMain(); } else { showSetup(); }
 
     document.querySelectorAll('[data-duration]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -541,6 +657,7 @@
       document.getElementById('status').textContent = 'Settings saved';
       document.getElementById('status').className = 'status success';
       loadPros();
+      updateHeaderBadge();
     }
 
     function renderRecent() {
